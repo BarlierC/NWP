@@ -1,0 +1,21 @@
+---
+title: "Next Word Prediction Shiny app"
+author: "Céline Barlier"
+date: "1/29/2022"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Next Word Prediction
+
+
+## XXX
+
+- Bullet 1
+- Bullet 2
+- Bullet 3
+
+
