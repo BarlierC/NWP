@@ -1,0 +1,598 @@
+---
+title: "Coursera Data Science Specialization capstone project - Week 2"
+author: "Celine B."
+date: "1/8/2022"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cerulean
+    highlight: kate
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+The aim of the Coursera Data Science Specialization capstone project is to develop a predictive model of text using a very large and unstructured database of the English language. This report is the first assignment of the project: it shows the exploratory analyses performed on the data.
+
+Code used is available in Appendix at the end of the report
+
+```{r echo=FALSE,warning=FALSE,message=FALSE,results='hide'}
+#Load libraries used
+library(tm)
+library(RWeka)
+library(R.utils)
+library(stringr)
+library(stringi)
+library(wordcloud)
+library(RColorBrewer)
+library(ggplot2)
+library(qdap)
+library(Matrix)
+```
+
+## Exploratory analyses
+
+### Summary statistics
+
+```{r echo = FALSE}
+#Path to the data folder
+pathData <- "~/Desktop/COURSERA/final/en_US/"
+pathBadWords <- "~/Desktop/COURSERA/"
+```
+
+```{r echo=FALSE,warning=FALSE,message=FALSE,results='hide'}
+#Load the data
+conTwits <- file(paste0(pathData,"en_US.twitter.txt"), "r") 
+twits <- readLines(conTwits,skipNul = TRUE)
+close(conTwits)
+conBlogs <- file(paste0(pathData,"en_US.blogs.txt"), "r") 
+blogs <- readLines(conBlogs,skipNul = TRUE)
+close(conBlogs)
+conNews <- file(paste0(pathData,"en_US.news.txt"), "r") 
+news <- readLines(conNews,skipNul = TRUE)
+close(conNews)
+
+#Basic stats using stringi
+stats_twits <- stri_stats_latex(twits)
+stats_blogs <- stri_stats_latex(blogs)
+stats_news <- stri_stats_latex(news)
+
+#Data.frame of summary statistics
+dfstats <- data.frame("File"=c("Twitter","Blog","News"),
+                      "Size"=c(format(object.size(twits),"MB"),format(object.size(blogs),"MB"),format(object.size(news),"MB")),
+                      "Lines"=c(as.numeric(countLines(paste0(pathData,"en_US.twitter.txt"))),
+                                as.numeric(countLines(paste0(pathData,"en_US.blogs.txt"))),
+                                as.numeric(countLines(paste0(pathData,"en_US.news.txt")))),
+                      "Characters"=c(as.numeric(stats_twits[1]),as.numeric(stats_blogs[1]),as.numeric(stats_news[1])),
+                      "WhiteSpaces"=c(as.numeric(stats_twits[3]),as.numeric(stats_blogs[3]),as.numeric(stats_news[3])),
+                      "Words"=c(as.numeric(stats_twits[4]),as.numeric(stats_blogs[4]),as.numeric(stats_news[4]))
+                      )
+```
+
+```{r}
+#Print data.frame of summary statistics
+print(dfstats)
+```
+
+We can observe that the 3 datasets are indeed very large. Due to the huge amount of data and the limited computational resources, datasets will be down-sampled for the exploratory analyses. The steps performed are (1) data sampling, (2) data cleaning and (2) tokenization using n-grams.
+
+### Data sampling
+
+Due to the size of the data and the limited computational resources, dataset are down-sampled and 10k sentences are kept for each of them. In addition, the 3 datasets are combined into one to perform exploratory analyses and observe the difference in words and n-grams frequency between individual datasets and all merged.
+
+```{r echo=FALSE,warning=FALSE,message=FALSE,results='hide'}
+#Set seed for reproducibility
+set.seed(1234)
+
+#Down-sample Twitter
+subtwits <- sample(twits,10000,replace=F)
+
+#Down-sample Blogs
+subblogs <- sample(blogs,10000,replace=F)
+
+#Down-sample News
+subnews <- sample(news,10000,replace=F)
+
+#Combine all
+suball <- c(subtwits,subblogs,subnews)
+
+#Free space
+rm(twits)
+rm(blogs)
+rm(news)
+gc()
+```
+
+### Data cleaning 
+
+This step consist into cleaning the data and transform it into a corpus object for analyses. The cleaning step will remove non-English characters, text within brackets, twitter handle, emails, URLs, punctuation, numbers, extra white spaces, stop words *(commonly used english words)* and profantiy words In addition, it replaces abbreviations and contractions by their original words *(qdap R package)*. All words are converted to lower case. 
+
+```{r echo=FALSE}
+#Function to create clean corpus:
+# (2) clean data: remove twitter handle, emails, URLs, punctuation, numbers, extra white spaces, stop words & transform all words to lower case
+# (3) remove profanity
+getCleanCorpus <- function(docsText,profanityWords){
+  
+  #Remove non-English characters
+  docsText <- iconv(docsText,"latin1","ASCII",sub="")
+
+  #Remove specific words found highly frequent: www, dot, com
+  docsText <- str_replace_all(docsText,"www","")
+  docsText <- str_replace_all(docsText,"dot","")
+  docsText <- str_replace_all(docsText,"com","")
+  
+  #Remove repetition of words
+  docsText <- str_replace_all(docsText,"(\\w+[:space:])\\1+","\\1")
+  
+  #Remove text within brackets
+  docsText <- bracketX(docsText)
+  
+  #Replace abbreviations
+  docsText <- replace_abbreviation(docsText)
+  
+  #Replace contractions
+  docsText <- replace_contraction(docsText)
+  
+  #Remove repetition of words
+  docsText <- sapply(docsText,function(w){paste(unique(w),collapse = " ")},simplify = TRUE)
+  
+  #Create corpus object
+  corpusObj <- VCorpus(VectorSource(docsText))
+  
+  #Regex function
+  cleanUsingRegex <- content_transformer(function(w,regexExp) gsub(regexExp," ",w))
+  
+  #Remove Twitter #
+  corpusObj <- tm_map(corpusObj,cleanUsingRegex,"@[^\\s]{1,15}")
+
+  #Remove emails
+  corpusObj <- tm_map(corpusObj,cleanUsingRegex,"^[[:alnum:].-_]+@[[:alnum:].-]+$")
+  
+  #Remove URLs
+  corpusObj <- tm_map(corpusObj,cleanUsingRegex,"(f|ht)tp[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+")
+  
+  #Remove punctuation
+  corpusObj <- tm_map(corpusObj,removePunctuation)
+  
+  #Remove numbers
+  corpusObj <- tm_map(corpusObj,removeNumbers)
+  
+  #Remove extra white spaces
+  corpusObj <- tm_map(corpusObj,stripWhitespace)
+  
+  #Transform into lower case
+  corpusObj <- tm_map(corpusObj,content_transformer(tolower))
+  
+  #Remove stop words
+  corpusObj <- tm_map(corpusObj, removeWords, stopwords("english"))
+  
+  #Remove profanity words
+  corpusObj <- tm_map(corpusObj, removeWords, profanityWords)
+  
+  corpusObj <- tm_map(corpusObj, PlainTextDocument)
+  
+  #Return
+  return(corpusObj)
+}
+```
+
+```{r echo=FALSE}
+#Load profanity words
+#Downloaded from https://raw.githubusercontent.com/shutterstock/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/en
+conBadWords <- file(paste0(pathBadWords,"profanityWords.txt"), "r")
+profanityWords <- VectorSource(readLines(conBadWords))
+close(conBadWords)
+
+#Clean Twitter corpus
+twitCorpus <- getCleanCorpus(subtwits,profanityWords)
+rm(subtwits)
+
+#Clean Blogs corpus
+blogsCorpus <- getCleanCorpus(subblogs,profanityWords)
+rm(subblogs)
+
+#Clean News corpus
+newsCorpus <- getCleanCorpus(subnews,profanityWords)
+rm(subnews)
+
+#Clean All corpus
+allCorpus <- getCleanCorpus(suball,profanityWords)
+rm(suball)
+```
+
+### Words frequency
+
+This part of the report display the most frequent words for Twitter, Blogs, News and combined data.
+
+```{r echo=FALSE}
+#Function to get word frequency
+getWordCloud <- function(corpusObj){
+  mtx <- as.matrix(TermDocumentMatrix(corpusObj))
+  mtxfreq <- sort(rowSums(mtx), decreasing = TRUE)
+  wfreq <- data.frame("Word" = names(mtxfreq), "Freq" = mtxfreq)
+  return(wfreq)
+}
+```
+
+#### Twitter
+
+```{r}
+wf_twits <- getWordCloud(twitCorpus)
+wordcloud(words = wf_twits$Word,freq = wf_twits$Freq,min.freq = 1,max.words = 100,random.order = FALSE,colors=brewer.pal(9, "Purples"))
+rm(wf_twits)
+```
+
+#### Blogs
+
+```{r}
+wf_blogs <- getWordCloud(blogsCorpus)
+wordcloud(words = wf_blogs$Word,freq = wf_blogs$Freq,min.freq = 1,max.words = 100,random.order = FALSE,colors=brewer.pal(9, "Purples"))
+rm(wf_blogs)
+```
+
+#### News
+
+```{r}
+wf_news <- getWordCloud(newsCorpus)
+wordcloud(words = wf_news$Word,freq = wf_news$Freq,min.freq = 1,max.words = 100,random.order = FALSE,colors=brewer.pal(9, "Purples"))
+rm(wf_news)
+```
+
+#### All data
+
+```{r}
+wf_all <- getWordCloud(allCorpus)
+wordcloud(words = wf_all$Word,freq = wf_all$Freq,min.freq = 1,max.words = 100,random.order = FALSE,colors=brewer.pal(9, "Purples"))
+rm(wf_all)
+```
+
+```{r echo=FALSE,results='hide'}
+#Free unused memory
+gc()
+```
+
+### n-Gram frequencies
+
+This final part of the report show frequencies of N-grams with N = 2 or 3 for Twitter, Blogs, News and combined data. *Of note, 1-gram frequencies corresponds to the word clouds displayed in the previous part.*
+
+```{r echo=FALSE}
+#Function to tokenize into n-gram
+N2gramToken <- function(w){NGramTokenizer(w,Weka_control(min=2,max=2))}
+N3gramToken <- function(w){NGramTokenizer(w,Weka_control(min=3,max=3))}
+
+#Function to plot barplot of top 10 most frequent n-gram
+getBarplotFreq <- function(corpusText,ngram,ttl){
+  
+  # Term document obj depending on N-gram
+  if(ngram==2){
+    tdm <- TermDocumentMatrix(corpusText, control = list(tokenize = N2gramToken))
+  }else{
+    tdm <- TermDocumentMatrix(corpusText, control = list(tokenize = N3gramToken))
+  }
+  
+  #Convert to sparseMatrix
+  mtx <-  Matrix::sparseMatrix(i=tdm$i,j=tdm$j,x=tdm$v,dims=c(tdm$nrow, tdm$ncol),dimnames = tdm$dimnames)
+  rm(tdm)
+  
+  # Frequency
+  freq <- sort(Matrix::rowSums(mtx), decreasing = TRUE)
+  # Freq fataframe
+  freqdf <- data.frame("Word" = names(freq), "Freq" = freq)
+  
+  # Plot
+  top10 <- freqdf[1:10,]
+  p <- ggplot(top10,aes(x=reorder(Word,-Freq),y=Freq)) + 
+    geom_bar(stat="identity", fill="lightblue") + 
+    theme(axis.text.x = element_text(angle = 75,vjust=1,hjust=1)) +
+    xlab("Word") + 
+    ylab("Frequency") + 
+    ggtitle(ttl)
+  
+  #Clean
+  rm(mtx)
+  rm(freq)
+  rm(freqdf)
+  rm(top10)
+  gc()
+  
+  #Return
+  return(p)
+}
+```
+
+#### Twitter
+
+##### 2-grams
+```{r}
+print(getBarplotFreq(twitCorpus,2,"Top 10 most frequent 2-grams"))
+```
+
+##### 3-grams
+```{r}
+print(getBarplotFreq(twitCorpus,3,"Top 10 most frequent 3-grams"))
+#Clean for memory
+rm(twitCorpus)
+```
+
+#### Blogs
+
+##### 2-grams
+```{r}
+print(getBarplotFreq(blogsCorpus,2,"Top 10 most frequent 2-grams"))
+```
+
+##### 3-grams
+```{r}
+print(getBarplotFreq(blogsCorpus,3,"Top 10 most frequent 3-grams"))
+#Clean for memory
+rm(blogsCorpus)
+```
+
+#### News
+
+##### 2-grams
+```{r}
+print(getBarplotFreq(newsCorpus,2,"Top 10 most frequent 2-grams"))
+```
+
+##### 3-grams
+```{r}
+print(getBarplotFreq(newsCorpus,3,"Top 10 most frequent 3-grams"))
+#Clean for memory
+rm(newsCorpus)
+```
+
+```{r echo=FALSE,results='hide'}
+#Free unused memory
+gc()
+```
+
+#### All data
+
+##### 2-grams
+```{r}
+print(getBarplotFreq(allCorpus,2,"Top 10 most frequent 2-grams"))
+```
+
+##### 3-grams
+```{r}
+print(getBarplotFreq(allCorpus,3,"Top 10 most frequent 3-grams"))
+#Clean for memory
+rm(allCorpus)
+```
+
+### Summary
+
+This exploratory analysis allowed us to **get a sense of the words distribution and their relationship**. For the predictive model, the combination of the 3 datasets will be used and, due to their large size a solution will be implemented to systematically retrieve word frequencies by subsets that will be merged into a final database. This will be used to generate N-grams dictionaries that will be of stored and used to build the predictive model.
+
+## Appendix
+
+### Libraries
+
+```{r eval=FALSE}
+#Load libraries used
+library(tm)
+library(RWeka)
+library(R.utils)
+library(stringr)
+library(stringi)
+library(wordcloud)
+library(RColorBrewer)
+library(ggplot2)
+library(qdap)
+library(Matrix)
+```
+
+### Summary statistics
+
+```{r eval=FALSE}
+#Load the data
+conTwits <- file(paste0(pathData,"en_US.twitter.txt"), "r") 
+twits <- readLines(conTwits,skipNul = TRUE)
+close(conTwits)
+conBlogs <- file(paste0(pathData,"en_US.blogs.txt"), "r") 
+blogs <- readLines(conBlogs,skipNul = TRUE)
+close(conBlogs)
+conNews <- file(paste0(pathData,"en_US.news.txt"), "r") 
+news <- readLines(conNews,skipNul = TRUE)
+close(conNews)
+
+#Basic stats using stringi
+stats_twits <- stri_stats_latex(twits)
+stats_blogs <- stri_stats_latex(blogs)
+stats_news <- stri_stats_latex(news)
+
+#Data.frame of summary statistics
+dfstats <- data.frame("File"=c("Twitter","Blog","News"),
+                      "Size"=c(format(object.size(twits),"MB"),format(object.size(blogs),"MB"),format(object.size(news),"MB")),
+                      "Lines"=c(as.numeric(countLines(paste0(pathData,"en_US.twitter.txt"))),
+                                as.numeric(countLines(paste0(pathData,"en_US.blogs.txt"))),
+                                as.numeric(countLines(paste0(pathData,"en_US.news.txt")))),
+                      "Characters"=c(as.numeric(stats_twits[1]),as.numeric(stats_blogs[1]),as.numeric(stats_news[1])),
+                      "WhiteSpaces"=c(as.numeric(stats_twits[3]),as.numeric(stats_blogs[3]),as.numeric(stats_news[3])),
+                      "Words"=c(as.numeric(stats_twits[4]),as.numeric(stats_blogs[4]),as.numeric(stats_news[4]))
+                      )
+```
+
+### Data sampling
+
+```{r eval=FALSE}
+#Set seed for reproducibility
+set.seed(1234)
+
+#Down-sample Twitter
+subtwits <- sample(twits,10000,replace=F)
+
+#Down-sample Blogs
+subblogs <- sample(blogs,10000,replace=F)
+
+#Down-sample News
+subnews <- sample(news,10000,replace=F)
+
+#Combine all
+suball <- c(subtwits,subblogs,subnews)
+
+#Free space
+rm(twits)
+rm(blogs)
+rm(news)
+gc()
+```
+
+### Data cleaning
+
+```{r eval=FALSE}
+#Function to create clean corpus:
+# (2) clean data: remove twitter handle, emails, URLs, punctuation, numbers, extra white spaces, stop words & transform all words to lower case
+# (3) remove profanity
+getCleanCorpus <- function(docsText,profanityWords){
+  
+  #Remove non-English characters
+  docsText <- iconv(docsText,"latin1","ASCII",sub="")
+
+  #Remove specific words found highly frequent: www, dot, com
+  docsText <- str_replace_all(docsText,"www","")
+  docsText <- str_replace_all(docsText,"dot","")
+  docsText <- str_replace_all(docsText,"com","")
+  
+  #Remove repetition of words
+  docsText <- str_replace_all(docsText,"(\\w+[:space:])\\1+","\\1")
+  
+  #Remove text within brackets
+  docsText <- bracketX(docsText)
+  
+  #Replace abbreviations
+  docsText <- replace_abbreviation(docsText)
+  
+  #Replace contractions
+  docsText <- replace_contraction(docsText)
+  
+  #Remove repetition of words
+  docsText <- sapply(docsText,function(w){paste(unique(w),collapse = " ")},simplify = TRUE)
+  
+  #Create corpus object
+  corpusObj <- VCorpus(VectorSource(docsText))
+  
+  #Regex function
+  cleanUsingRegex <- content_transformer(function(w,regexExp) gsub(regexExp," ",w))
+  
+  #Remove Twitter #
+  corpusObj <- tm_map(corpusObj,cleanUsingRegex,"@[^\\s]{1,15}")
+
+  #Remove emails
+  corpusObj <- tm_map(corpusObj,cleanUsingRegex,"^[[:alnum:].-_]+@[[:alnum:].-]+$")
+  
+  #Remove URLs
+  corpusObj <- tm_map(corpusObj,cleanUsingRegex,"(f|ht)tp[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+")
+  
+  #Remove punctuation
+  corpusObj <- tm_map(corpusObj,removePunctuation)
+  
+  #Remove numbers
+  corpusObj <- tm_map(corpusObj,removeNumbers)
+  
+  #Remove extra white spaces
+  corpusObj <- tm_map(corpusObj,stripWhitespace)
+  
+  #Transform into lower case
+  corpusObj <- tm_map(corpusObj,content_transformer(tolower))
+  
+  #Remove stop words
+  corpusObj <- tm_map(corpusObj, removeWords, stopwords("english"))
+  
+  #Remove profanity words
+  corpusObj <- tm_map(corpusObj, removeWords, profanityWords)
+  
+  corpusObj <- tm_map(corpusObj, PlainTextDocument)
+  
+  #Return
+  return(corpusObj)
+}
+```
+
+```{r eval=FALSE}
+#Load profanity words
+#Downloaded from https://raw.githubusercontent.com/shutterstock/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/en
+conBadWords <- file(paste0(pathBadWords,"profanityWords.txt"), "r")
+profanityWords <- VectorSource(readLines(conBadWords))
+close(conBadWords)
+
+#Clean Twitter corpus
+twitCorpus <- getCleanCorpus(subtwits,profanityWords)
+rm(subtwits)
+
+#Clean Blogs corpus
+blogsCorpus <- getCleanCorpus(subblogs,profanityWords)
+rm(subblogs)
+
+#Clean News corpus
+newsCorpus <- getCleanCorpus(subnews,profanityWords)
+rm(subnews)
+
+#Clean All corpus
+allCorpus <- getCleanCorpus(suball,profanityWords)
+rm(suball)
+```
+
+### Words frequency
+
+```{r eval=FALSE}
+#Function to get word frequency
+getWordCloud <- function(corpusObj){
+  mtx <- as.matrix(TermDocumentMatrix(corpusObj))
+  mtxfreq <- sort(rowSums(mtx), decreasing = TRUE)
+  wfreq <- data.frame("Word" = names(mtxfreq), "Freq" = mtxfreq)
+  return(wfreq)
+}
+```
+
+### n-Gram frequencies
+
+```{r eval=FALSE}
+#Function to tokenize into n-gram
+N2gramToken <- function(w){NGramTokenizer(w,Weka_control(min=2,max=2))}
+N3gramToken <- function(w){NGramTokenizer(w,Weka_control(min=3,max=3))}
+
+#Function to plot barplot of top 10 most frequent n-gram
+getBarplotFreq <- function(corpusText,ngram,ttl){
+  
+  # Term document obj depending on N-gram
+  if(ngram==2){
+    tdm <- TermDocumentMatrix(corpusText, control = list(tokenize = N2gramToken))
+  }else{
+    tdm <- TermDocumentMatrix(corpusText, control = list(tokenize = N3gramToken))
+  }
+  
+  #Convert to sparseMatrix
+  mtx <-  Matrix::sparseMatrix(i=tdm$i,j=tdm$j,x=tdm$v,dims=c(tdm$nrow, tdm$ncol),dimnames = tdm$dimnames)
+  rm(tdm)
+  
+  # Frequency
+  freq <- sort(Matrix::rowSums(mtx), decreasing = TRUE)
+  # Freq fataframe
+  freqdf <- data.frame("Word" = names(freq), "Freq" = freq)
+  
+  # Plot
+  top10 <- freqdf[1:10,]
+  p <- ggplot(top10,aes(x=reorder(Word,-Freq),y=Freq)) + 
+    geom_bar(stat="identity", fill="lightblue") + 
+    theme(axis.text.x = element_text(angle = 75,vjust=1,hjust=1)) +
+    xlab("Word") + 
+    ylab("Frequency") + 
+    ggtitle(ttl)
+  
+  #Clean
+  rm(mtx)
+  rm(freq)
+  rm(freqdf)
+  rm(top10)
+  gc()
+  
+  #Return
+  return(p)
+}
+```
