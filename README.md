@@ -24,5 +24,5 @@ Resources:
 ### Deliverables
 
 - **Milestone report** data exploration: https://rpubs.com/CelB/CDSweek2Report
-- **Deck slides**:
-- **Shiny app**:
+- **Deck slides**: https://rpubs.com/CelB/DSC_slideDeck
+- **Shiny app**:https://cbarlier.shinyapps.io/NWPapp/
