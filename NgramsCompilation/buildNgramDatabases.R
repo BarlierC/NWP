@@ -132,8 +132,8 @@ getTokensFreq <- function(corpusText,ngram){
 #####################################
 
 #Path to the data folder
-pathData <- "~/COURSERA/final/en_US/"
-pathBadWords <- "~/COURSERA/"
+pathData <- "~/Desktop/COURSERA/final/en_US/"
+pathBadWords <- "~/Desktop/COURSERA//"
 
 #Load profanity words
 #Downloaded from https://raw.githubusercontent.com/shutterstock/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/en
@@ -213,6 +213,8 @@ for(i in seq(2,length(datalist))){
   rm(n2gi)
   gc()
 }
+#Remove firstW
+n2g$firstW <- NULL
 #Save
 saveRDS(n2g,"N2gramDb.rds")
 #free memory 
@@ -239,6 +241,8 @@ for(j in seq(2,length(datalist))){
   rm(n3gi)
   gc()
 }
+#Remove firstW
+n3g$firstW <- NULL
 #Save
 saveRDS(n3g,"N3gramDb.rds")
 #free memory 
@@ -265,6 +269,8 @@ for(z in seq(2,length(datalist))){
   rm(n4gi)
   gc()
 }
+#Remove firstW
+n4g$firstW <- NULL
 #Save
 saveRDS(n4g,"N4gramDb.rds")
 #free memory 
