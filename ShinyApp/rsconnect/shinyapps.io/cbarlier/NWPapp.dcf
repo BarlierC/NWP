@@ -1,0 +1,13 @@
+name: NWPapp
+title: NWPapp
+username:
+account: cbarlier
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 5592265
+bundleId: 5549761
+url: https://cbarlier.shinyapps.io/NWPapp/
+when: 1644178994.73787
+lastSyncTime: 1644178994.73789
+asMultiple: FALSE
+asStatic: FALSE

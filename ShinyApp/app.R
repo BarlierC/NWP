@@ -1,7 +1,12 @@
 library(shiny)
 library(shinythemes)
 library(markdown)
+library(stringr)
+library(stringi)
+library(qdap)
+library(tm)
 
+######### Graphical User Interface ###############
 ui <- fluidPage(
           theme = shinytheme("sandstone"),
           navbarPage("NWP",
@@ -31,13 +36,16 @@ ui <- fluidPage(
                  tabPanel("About",
                           # Application title
                           titlePanel("Next Word Prediction (NWP)"),
-                          p("NWP takes as an input multiple words and provides the top three most probable words.")
+                          p("NWP takes as an input multiple words and provides the top three most probable words."),
+                          p("This app has been created for the Data Science Capstone project proposed by Coursera:"),
+                          uiOutput("linkProject")
                  )
               )
           )
 
+##############################################
 
-# Define server logic
+########## Sever logic ######################
 
 #Load N-gram frequency databases
 db2Ngram <- readRDS("./data/N2gramDb.rds")
@@ -45,6 +53,11 @@ db3Ngram <- readRDS("./data/N3gramDb.rds")
 db4Ngram <- readRDS("./data/N4gramDb.rds")
 
 server <- function(input, output) {
+  
+  urlCoursera <- a("https://www.coursera.org/learn/data-science-project", href="https://www.coursera.org/learn/data-science-project")
+  output$linkProject <- renderUI({
+    tagList("Capstone Project Coursera:", urlCoursera)
+  })
   
   w1 <- reactive(predNextWord(input$words,1))
   w2 <- reactive(predNextWord(input$words,2))
@@ -81,13 +94,17 @@ predNextWord <- function(w,topn) {
     ws <- strsplit(w," ")[[1]]
     n <- length(ws)
     res <- runModel(paste(ws[(n-2):n],collapse=" "),4)
-    #If res empty > try 3 grams
-    if(length(res)==0){
-      res <- runModel(paste(ws[(n-1):n],collapse=" "),3)
-    }
-    #If res empty > try 2 grams
-    if(length(res)==0){
-      res <- runModel(ws[n],2)
+    if(length(res)==1){
+      #If res empty > try 3 grams
+      if(res==""){
+        res <- runModel(paste(ws[(n-1):n],collapse=" "),3)
+        if(length(res)==1){
+          #If res empty > try 2 grams
+          if(res==""){
+            res <- runModel(ws[n],2)
+          }
+        }
+      }
     }
   }
   
@@ -198,5 +215,7 @@ runModel <- function(w,n){
   }
   return(predWord)
 }
+
+##############################################
 
 shinyApp(ui, server)
